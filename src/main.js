@@ -71,7 +71,7 @@ async function loadAllFromSupabase(){
   state.subjectMaster = {};
   (subjRes.data||[]).forEach(row=>{
     if(!state.subjectMaster[row.class]) state.subjectMaster[row.class]=[];
-    state.subjectMaster[row.class].push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||""});
+    state.subjectMaster[row.class].push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""});
   });
 
   state.allotment = {};
@@ -361,29 +361,31 @@ function viewSubjects(){
   <div class="panel">
     <h3>Add Subject — ${esc(ui.subjClass)}</h3>
     <div class="small-note">Leave Code blank for Library, Coaching, or Event entries.</div>
-    <div class="grid-cols-3" style="margin-top:10px;">
+    <div class="grid-cols-4" style="margin-top:10px;">
       <div class="field"><label>Subject Code (optional)</label><input type="text" id="s_code"></div>
       <div class="field"><label>Subject Name</label><input type="text" id="s_title"></div>
       <div class="field"><label>Shortcut</label><input type="text" id="s_short"></div>
+      <div class="field"><label>Semester</label><input type="text" id="s_sem" placeholder="e.g. III"></div>
     </div>
     <div style="margin-top:10px;"><button class="btn primary" onclick="addSubjectMasterRow()">Add</button></div>
   </div>
   <div class="panel">
     <h3>Import from file — ${esc(ui.subjClass)}</h3>
-    <div class="small-note">Excel/CSV with header row containing Code, Title/Name, Shortcut columns (Shortcut can be blank and filled in later).</div>
+    <div class="small-note">Excel/CSV with header row containing Code, Title/Name, Shortcut, Semester columns (Shortcut and Semester can be blank and filled in later).</div>
     <input type="file" id="subjImportFile" accept=".xlsx,.xls,.csv" style="margin-top:8px;max-width:320px;">
     <div style="margin-top:8px;"><button class="btn" onclick="importSubjects()">Import</button></div>
   </div>
   <div class="panel">
     <h3>Subjects — ${esc(ui.subjClass)}</h3>
     <div class="tt-wrap">
-      <table class="datatable"><thead><tr><th>#</th><th>Code</th><th>Title</th><th>Shortcut</th><th></th></tr></thead>
-      <tbody>${list.length===0? `<tr><td colspan="5" class="empty-note">No subjects yet.</td></tr>` : list.map((s,i)=>`
+      <table class="datatable"><thead><tr><th>#</th><th>Code</th><th>Title</th><th>Shortcut</th><th>Semester</th><th></th></tr></thead>
+      <tbody>${list.length===0? `<tr><td colspan="6" class="empty-note">No subjects yet.</td></tr>` : list.map((s,i)=>`
         <tr>
           <td>${i+1}</td>
           <td><input type="text" style="min-width:90px;" value="${esc(s.code)}" onchange="updSubjMaster('${s.id}','code',this.value)"></td>
           <td><input type="text" style="min-width:200px;" value="${esc(s.title)}" onchange="updSubjMaster('${s.id}','title',this.value)"></td>
           <td><input type="text" style="width:80px;font-weight:700;" value="${esc(s.shortcut)}" onchange="updSubjMaster('${s.id}','shortcut',this.value)"></td>
+          <td><input type="text" style="width:80px;" value="${esc(s.semester)}" onchange="updSubjMaster('${s.id}','semester',this.value)"></td>
           <td><button class="btn small danger" onclick="delSubjMaster('${s.id}')">✕</button></td>
         </tr>`).join('')}</tbody>
       </table>
@@ -395,14 +397,15 @@ async function addSubjectMasterRow(){
   const code = document.getElementById('s_code').value.trim();
   const title = document.getElementById('s_title').value.trim();
   const shortcut = document.getElementById('s_short').value.trim();
+  const semester = document.getElementById('s_sem').value.trim();
   if(!title){ alert("Subject name is required."); return; }
-  const data = await sbCall(supabase.from('subject_master').insert({class:ui.subjClass, code, title, shortcut}).select().single(), "Add subject");
-  subjMasterList(ui.subjClass).push({id:data.id, code:data.code||"", title:data.title||"", shortcut:data.shortcut||""});
+  const data = await sbCall(supabase.from('subject_master').insert({class:ui.subjClass, code, title, shortcut, semester}).select().single(), "Add subject");
+  subjMasterList(ui.subjClass).push({id:data.id, code:data.code||"", title:data.title||"", shortcut:data.shortcut||"", semester:data.semester||""});
   renderTabBody();
 }
 async function updSubjMaster(id,field,val){
   const list = subjMasterList(ui.subjClass); const s=list.find(x=>x.id===id); if(!s) return;
-  const col = field==='code'?'code':field==='title'?'title':'shortcut';
+  const col = field==='code'?'code':field==='title'?'title':field==='semester'?'semester':'shortcut';
   await sbCall(supabase.from('subject_master').update({[col]:val}).eq('id',id), "Update subject");
   s[field]=val;
 }
@@ -425,6 +428,7 @@ function importSubjects(){
       const codeIdx = header.findIndex(h=>h.includes('code'));
       const titleIdx = header.findIndex(h=>h.includes('title')||h.includes('name'));
       const shortIdx = header.findIndex(h=>h.includes('short'));
+      const semIdx = header.findIndex(h=>h.includes('sem'));
       if(titleIdx===-1){ alert("Could not find a Title/Name column in the file header."); return; }
       const list = subjMasterList(ui.subjClass);
       const toInsert = [];
@@ -433,12 +437,13 @@ function importSubjects(){
         const title = row[titleIdx].toString().trim();
         const code = codeIdx>=0 && row[codeIdx] ? row[codeIdx].toString().trim() : "";
         const shortcut = shortIdx>=0 && row[shortIdx] ? row[shortIdx].toString().trim() : "";
+        const semester = semIdx>=0 && row[semIdx] ? row[semIdx].toString().trim() : "";
         if(code && list.some(s=>s.code && s.code.toLowerCase()===code.toLowerCase())) continue;
-        toInsert.push({class:ui.subjClass, code, title, shortcut});
+        toInsert.push({class:ui.subjClass, code, title, shortcut, semester});
       }
       if(!toInsert.length){ alert("Nothing new to import."); return; }
       const data = await sbCall(supabase.from('subject_master').insert(toInsert).select(), "Import subjects");
-      data.forEach(row=> list.push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||""}));
+      data.forEach(row=> list.push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""}));
       renderTabBody();
       alert(`Imported ${data.length} subject(s) into ${ui.subjClass}.`);
     }catch(err){ alert("Could not read that file: "+err.message); }

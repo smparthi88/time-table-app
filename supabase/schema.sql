@@ -32,6 +32,7 @@ create table if not exists subject_master (
   code text,
   title text not null,
   shortcut text,
+  semester text,
   created_at timestamptz default now()
 );
 create index if not exists idx_subject_master_class on subject_master(class);

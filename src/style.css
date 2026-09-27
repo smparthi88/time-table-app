@@ -83,7 +83,8 @@ table.grid td.break-cell{background:var(--accent-soft);font-weight:700;writing-m
 .pill{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;}
 .grid-cols-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .grid-cols-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
-@media(max-width:640px){.grid-cols-2,.grid-cols-3{grid-template-columns:1fr;}}
+.grid-cols-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;}
+@media(max-width:640px){.grid-cols-2,.grid-cols-3,.grid-cols-4{grid-template-columns:1fr;}}
 .small-note{font-size:11.5px;color:var(--ink-dim);}
 .version-chip{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer;}
 .version-chip.active{border-color:var(--ok);background:var(--ok-soft);font-weight:700;}

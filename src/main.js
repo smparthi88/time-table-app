@@ -20,7 +20,6 @@ const COLUMNS = [
   {type:'period', idx:8, label:"04:10 PM TO\n05:00 PM", hour:9},
 ];
 const PERIOD_COUNT = 9;
-const CLASS_LIST = ["II A","II B","III A","III B","IV A","IV B"];
 const YEAR_OPTS = ["I Year","II Year","III Year","IV Year"];
 const COLOR_PALETTE = ["#FDE68A","#BFDBFE","#BBF7D0","#FBCFE8","#DDD6FE","#FED7AA","#A7F3D0","#FCA5A5","#C7D2FE","#FDE2E4","#D9F99D","#99F6E4","#FFE4B5","#B0E0E6"];
 const COLLEGE = { name:"KONGUNADU COLLEGE OF ENGINEERING AND TECHNOLOGY", caption:"(AUTONOMOUS)",
@@ -34,17 +33,20 @@ const COLLEGE = { name:"KONGUNADU COLLEGE OF ENGINEERING AND TECHNOLOGY", captio
 let state = {
   faculty: [],
   academicYear: "2025-2026", semester:"ODD", programme:"B.Tech - Information Technology",
-  subjectMaster: {},   // class -> [{id,code,title,shortcut}]
+  classes: [],          // [{id,name}] — dynamic, extra sections can be added
+  subjects: [],         // flat shared pool: [{id,code,title,shortcut,semester}]
   allotment: {},       // class -> { acadYear -> [{id,subjectId,faculty,workload,color}] }
   ourTT: {},           // class -> [versions]
   ourActive: {},       // class -> versionId
   otherTT: []
 };
+function classList(){ return state.classes.map(c=>c.name); }
 
 async function loadAllFromSupabase(){
-  const [settingsRes, facultyRes, subjRes, allotRes, verRes, otherRes] = await Promise.all([
+  const [settingsRes, facultyRes, classesRes, subjRes, allotRes, verRes, otherRes] = await Promise.all([
     supabase.from('app_settings').select('*').single(),
     supabase.from('faculty').select('*').order('name'),
+    supabase.from('classes').select('*').order('sort_order'),
     supabase.from('subject_master').select('*').order('created_at'),
     supabase.from('allotments').select('*'),
     supabase.from('our_versions').select('*').order('created_at'),
@@ -52,6 +54,7 @@ async function loadAllFromSupabase(){
   ]);
   if(settingsRes.error) throw settingsRes.error;
   if(facultyRes.error) throw facultyRes.error;
+  if(classesRes.error) throw classesRes.error;
   if(subjRes.error) throw subjRes.error;
   if(allotRes.error) throw allotRes.error;
   if(verRes.error) throw verRes.error;
@@ -68,11 +71,9 @@ async function loadAllFromSupabase(){
     aadhar:f.aadhar||"", pan:f.pan||""
   }));
 
-  state.subjectMaster = {};
-  (subjRes.data||[]).forEach(row=>{
-    if(!state.subjectMaster[row.class]) state.subjectMaster[row.class]=[];
-    state.subjectMaster[row.class].push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""});
-  });
+  state.classes = (classesRes.data||[]).map(row=>({id:row.id, name:row.name, sortOrder:row.sort_order}));
+
+  state.subjects = (subjRes.data||[]).map(row=>({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""}));
 
   state.allotment = {};
   (allotRes.data||[]).forEach(row=>{
@@ -109,7 +110,6 @@ function nextColor(list){ const used=list.map(s=>s.color); for(const c of COLOR_
 function emptyGrid(){ const g={}; DAYS.forEach(d=> g[d]=new Array(PERIOD_COUNT).fill("")); return g; }
 function mask(v){ if(!v) return ""; const s=v.toString(); return s.length<=4? "••••" : "••••"+s.slice(-4); }
 
-function subjMasterList(cls){ if(!state.subjectMaster[cls]) state.subjectMaster[cls]=[]; return state.subjectMaster[cls]; }
 const ROMAN_SEM = { "I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8 };
 const YEAR_SEMESTERS_NUM = { "II":[3,4], "III":[5,6], "IV":[7,8] };
 function classYear(cls){ return (cls||"").trim().split(" ")[0]; }
@@ -126,12 +126,25 @@ function semesterToNum(v){
   const n = parseInt(s.replace(/[^0-9]/g,''), 10);
   return isNaN(n) ? null : n;
 }
-function subjMasterListForClass(cls){
+/* shared subject pool, filtered to the semesters that match a class's year */
+function subjectsForClass(cls){
   const allowed = YEAR_SEMESTERS_NUM[classYear(cls)] || [];
-  return subjMasterList(cls).filter(s => {
+  return state.subjects.filter(s => {
     const n = semesterToNum(s.semester);
     return n===null || allowed.includes(n);
   });
+}
+async function addClass(){
+  const name = prompt("New class/section name (e.g. II C):");
+  if(!name) return;
+  const trimmed = name.trim();
+  if(!trimmed) return;
+  if(classList().some(c=>c.toLowerCase()===trimmed.toLowerCase())){ alert("That class already exists."); return; }
+  const sortOrder = state.classes.length;
+  const data = await sbCall(supabase.from('classes').insert({name:trimmed, sort_order:sortOrder}).select().single(), "Add class");
+  state.classes.push({id:data.id, name:data.name, sortOrder:data.sort_order});
+  ui.allotClass = trimmed; ui.ourClass = trimmed;
+  renderTabBody();
 }
 function allotList(cls,ay){
   if(!state.allotment[cls]) state.allotment[cls]={};
@@ -150,7 +163,7 @@ function otherLabel(rec){ return (rec.meta.department||'Dept')+" "+(rec.meta.yea
    active version per class + every other-dept record */
 function allTimetables(){
   const list=[];
-  CLASS_LIST.forEach(c=>{ const rec=activeOurRec(c); if(rec) list.push({scope:'class', label:'Our Dept - '+c, key:c, rec}); });
+  classList().forEach(c=>{ const rec=activeOurRec(c); if(rec) list.push({scope:'class', label:'Our Dept - '+c, key:c, rec}); });
   state.otherTT.forEach(r=> list.push({scope:'other', label:'Other Dept - '+otherLabel(r), key:r.id, rec:r}));
   return list;
 }
@@ -223,10 +236,10 @@ let ui = {
   facMaskAll:true,
   facFilterText:"",
   facExportIncludeIds:false,
-  subjClass: CLASS_LIST[0],
-  allotClass: CLASS_LIST[0],
+  subjSemFilter: "",
+  allotClass: "",
   allotYear: state.academicYear,
-  ourClass: CLASS_LIST[0],
+  ourClass: "",
   otherActiveId: null,
   repClassSel: [],
   repFacSingle:"",
@@ -387,19 +400,20 @@ function exportFacultyDirectoryExcel(){
   XLSX.writeFile(wb, "Faculty_Directory.xlsx");
 }
 
-/* ================= SUBJECT MASTER ================= */
+/* ================= SUBJECT MASTER (single shared pool for the whole department) ================= */
 function viewSubjects(){
-  const allowedSem = classSemesters(ui.subjClass);
-  const list = subjMasterList(ui.subjClass);
+  const filterSem = ui.subjSemFilter;
+  const list = filterSem
+    ? state.subjects.filter(s=> semesterToNum(s.semester)===semesterToNum(filterSem))
+    : state.subjects;
+  const semOptions = ["I","II","III","IV","V","VI","VII","VIII"];
   return `
   <div class="panel">
     <h2>Subject Master</h2>
-    <div class="row" style="margin-top:8px;">
-      ${CLASS_LIST.map(c=>`<button class="tab-btn ${ui.subjClass===c?'active':''}" onclick="setSubjClass('${c}')">${c}</button>`).join('')}
-    </div>
+    <div class="small-note">One shared list for all classes — add each subject once, tag it with its semester. Allotment automatically filters this list per class.</div>
   </div>
   <div class="panel">
-    <h3>Add Subject — ${esc(ui.subjClass)}</h3>
+    <h3>Add Subject</h3>
     <div class="small-note">Leave Code blank for Library, Coaching, or Event entries.</div>
     <div class="grid-cols-4" style="margin-top:10px;">
       <div class="field"><label>Subject Code (optional)</label><input type="text" id="s_code"></div>
@@ -410,13 +424,20 @@ function viewSubjects(){
     <div style="margin-top:10px;"><button class="btn primary" onclick="addSubjectMasterRow()">Add</button></div>
   </div>
   <div class="panel">
-    <h3>Import from file — ${esc(ui.subjClass)}</h3>
+    <h3>Import from file</h3>
     <div class="small-note">Excel/CSV with header row containing Code, Title/Name, Shortcut, Semester columns (Shortcut and Semester can be blank and filled in later).</div>
     <input type="file" id="subjImportFile" accept=".xlsx,.xls,.csv" style="margin-top:8px;max-width:320px;">
     <div style="margin-top:8px;"><button class="btn" onclick="importSubjects()">Import</button></div>
   </div>
   <div class="panel">
-    <h3>Subjects — ${esc(ui.subjClass)} <span class="small-note">(typical Semester ${allowedSem.join(' & ')})</span></h3>
+    <h3>All Subjects</h3>
+    <div class="field" style="max-width:220px;margin-bottom:10px;">
+      <label>Filter by semester (optional)</label>
+      <select onchange="ui.subjSemFilter=this.value; renderTabBody();">
+        <option value="">All semesters</option>
+        ${semOptions.map(o=>`<option value="${o}" ${filterSem===o?'selected':''}>${o}</option>`).join('')}
+      </select>
+    </div>
     <div class="tt-wrap">
       <table class="datatable"><thead><tr><th>#</th><th>Code</th><th>Title</th><th>Shortcut</th><th>Semester</th><th></th></tr></thead>
       <tbody>${list.length===0? `<tr><td colspan="6" class="empty-note">No subjects yet.</td></tr>` : list.map((s,i)=>`
@@ -432,26 +453,25 @@ function viewSubjects(){
     </div>
   </div>`;
 }
-function setSubjClass(c){ ui.subjClass=c; renderTabBody(); }
 async function addSubjectMasterRow(){
   const code = document.getElementById('s_code').value.trim();
   const title = document.getElementById('s_title').value.trim();
   const shortcut = document.getElementById('s_short').value.trim();
   const semester = document.getElementById('s_sem').value.trim();
   if(!title){ alert("Subject name is required."); return; }
-  const data = await sbCall(supabase.from('subject_master').insert({class:ui.subjClass, code, title, shortcut, semester}).select().single(), "Add subject");
-  subjMasterList(ui.subjClass).push({id:data.id, code:data.code||"", title:data.title||"", shortcut:data.shortcut||"", semester:data.semester||""});
+  const data = await sbCall(supabase.from('subject_master').insert({code, title, shortcut, semester}).select().single(), "Add subject");
+  state.subjects.push({id:data.id, code:data.code||"", title:data.title||"", shortcut:data.shortcut||"", semester:data.semester||""});
   renderTabBody();
 }
 async function updSubjMaster(id,field,val){
-  const list = subjMasterList(ui.subjClass); const s=list.find(x=>x.id===id); if(!s) return;
+  const s = state.subjects.find(x=>x.id===id); if(!s) return;
   const col = field==='code'?'code':field==='title'?'title':field==='semester'?'semester':'shortcut';
   await sbCall(supabase.from('subject_master').update({[col]:val}).eq('id',id), "Update subject");
   s[field]=val;
 }
 async function delSubjMaster(id){
   await sbCall(supabase.from('subject_master').delete().eq('id',id), "Delete subject");
-  state.subjectMaster[ui.subjClass] = subjMasterList(ui.subjClass).filter(s=>s.id!==id);
+  state.subjects = state.subjects.filter(s=>s.id!==id);
   renderTabBody();
 }
 function importSubjects(){
@@ -470,7 +490,6 @@ function importSubjects(){
       const shortIdx = header.findIndex(h=>h.includes('short'));
       const semIdx = header.findIndex(h=>h.includes('sem'));
       if(titleIdx===-1){ alert("Could not find a Title/Name column in the file header."); return; }
-      const list = subjMasterList(ui.subjClass);
       const toInsert = [];
       for(let i=1;i<rows.length;i++){
         const row = rows[i]; if(!row || !row[titleIdx]) continue;
@@ -478,14 +497,14 @@ function importSubjects(){
         const code = codeIdx>=0 && row[codeIdx] ? row[codeIdx].toString().trim() : "";
         const shortcut = shortIdx>=0 && row[shortIdx] ? row[shortIdx].toString().trim() : "";
         const semester = semIdx>=0 && row[semIdx] ? row[semIdx].toString().trim() : "";
-        if(code && list.some(s=>s.code && s.code.toLowerCase()===code.toLowerCase())) continue;
-        toInsert.push({class:ui.subjClass, code, title, shortcut, semester});
+        if(code && state.subjects.some(s=>s.code && s.code.toLowerCase()===code.toLowerCase())) continue;
+        toInsert.push({code, title, shortcut, semester});
       }
       if(!toInsert.length){ alert("Nothing new to import."); return; }
       const data = await sbCall(supabase.from('subject_master').insert(toInsert).select(), "Import subjects");
-      data.forEach(row=> list.push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""}));
+      data.forEach(row=> state.subjects.push({id:row.id, code:row.code||"", title:row.title||"", shortcut:row.shortcut||"", semester:row.semester||""}));
       renderTabBody();
-      alert(`Imported ${data.length} subject(s) into ${ui.subjClass}.`);
+      alert(`Imported ${data.length} subject(s).`);
     }catch(err){ alert("Could not read that file: "+err.message); }
   };
   reader.readAsArrayBuffer(file);
@@ -493,7 +512,7 @@ function importSubjects(){
 
 /* ================= ALLOTMENT ================= */
 function viewAllotment(){
-  const subjects = subjMasterList(ui.allotClass);
+  const subjects = subjectsForClass(ui.allotClass);
   const allowedSem = classSemesters(ui.allotClass);
   const rows = allotList(ui.allotClass, ui.allotYear);
   const facOptions = state.faculty.map(f=>`<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
@@ -501,7 +520,8 @@ function viewAllotment(){
   <div class="panel">
     <h2>Subject-Faculty Allotment</h2>
     <div class="row" style="margin-top:8px;">
-      ${CLASS_LIST.map(c=>`<button class="tab-btn ${ui.allotClass===c?'active':''}" onclick="setAllotClass('${c}')">${c}</button>`).join('')}
+      ${classList().map(c=>`<button class="tab-btn ${ui.allotClass===c?'active':''}" onclick="setAllotClass('${c}')">${c}</button>`).join('')}
+      <button class="btn small" onclick="addClass()">+ Add Class</button>
     </div>
     <div class="field" style="max-width:220px;margin-top:10px;">
       <label>Academic Year</label>
@@ -509,8 +529,8 @@ function viewAllotment(){
     </div>
   </div>
   <div class="panel">
-    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)} <span class="small-note">(typical Semester ${allowedSem.join(' & ')})</span></h3>
-    ${subjects.length===0? `<div class="empty-note">No subjects in the Subject Master for ${esc(ui.allotClass)} yet — add them in the Subject Master tab first.</div>` : `
+    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)} <span class="small-note">(Semester ${allowedSem.join(' & ')})</span></h3>
+    ${subjects.length===0? `<div class="empty-note">No Semester ${allowedSem.join(' & ')} subjects in the Subject Master yet — add them in the Subject Master tab first.</div>` : `
     <div class="tt-wrap">
       <table class="datatable">
         <thead><tr><th>Code</th><th>Subject</th><th>Shortcut</th><th>Faculty</th><th>Colour</th><th>Work Load</th></tr></thead>
@@ -560,7 +580,8 @@ function viewOurDept(){
   <div class="panel">
     <h2>Our Department / Class Timetable</h2>
     <div class="row" style="margin-top:8px;">
-      ${CLASS_LIST.map(c=>`<button class="tab-btn ${ui.ourClass===c?'active':''}" onclick="setOurClass('${c}')">${c}</button>`).join('')}
+      ${classList().map(c=>`<button class="tab-btn ${ui.ourClass===c?'active':''}" onclick="setOurClass('${c}')">${c}</button>`).join('')}
+      <button class="btn small" onclick="addClass()">+ Add Class</button>
     </div>
   </div>
   <div class="panel">
@@ -606,9 +627,8 @@ async function createOurVersion(cls){
   let label = document.getElementById('ov_label').value.trim();
   if(!label) label = "Version "+nowStr();
   const alRows = allotList(cls, ay);
-  const subjMaster = subjMasterList(cls);
   const subjects = alRows.filter(r=>r.faculty).map(r=>{
-    const sm = subjMaster.find(s=>s.id===r.subjectId) || {code:"",title:"",shortcut:""};
+    const sm = state.subjects.find(s=>s.id===r.subjectId) || {code:"",title:"",shortcut:""};
     return { id:uid('vs'), subjectId:r.subjectId, code:sm.code, title:sm.title, shortcut:sm.shortcut, faculty:r.faculty, workload:r.workload, color:r.color };
   });
   const meta = { academicYear: ay, semester: sem, programme: state.programme, hall, wef, advisor };
@@ -999,7 +1019,7 @@ function viewReports(){
   <div class="panel">
     <h3>Class-wise Report</h3>
     <div class="select-list">
-      ${CLASS_LIST.map(c=>`<label><input type="checkbox" ${ui.repClassSel.includes(c)?'checked':''} onchange="toggleClassSel('${c}',this.checked)"> ${c} ${activeOurRec(c)? '':'<span class="small-note">(no version)</span>'}</label>`).join('')}
+      ${classList().map(c=>`<label><input type="checkbox" ${ui.repClassSel.includes(c)?'checked':''} onchange="toggleClassSel('${c}',this.checked)"> ${c} ${activeOurRec(c)? '':'<span class="small-note">(no version)</span>'}</label>`).join('')}
     </div>
     <div class="row" style="margin-top:12px;">
       <button class="btn primary" ${ui.repClassSel.length===0?'disabled':''} onclick="exportClassWisePDF()">⬇ Combined PDF (${ui.repClassSel.length})</button>
@@ -1175,6 +1195,8 @@ async function boot(){
   renderLoading("Loading your data…");
   try{
     await loadAllFromSupabase();
+    if(!ui.allotClass) ui.allotClass = classList()[0]||"";
+    if(!ui.ourClass) ui.ourClass = classList()[0]||"";
     render();
   }catch(err){
     renderLoading("Could not load data: "+err.message+" — check your Supabase connection and RLS policies.");
@@ -1186,8 +1208,8 @@ Object.assign(window, {
   ui, state,
   setTab, renderTabBody,
   addFaculty, removeFaculty, toggleMaskAll, exportFacultyDirectoryPDF, exportFacultyDirectoryExcel,
-  setSubjClass, addSubjectMasterRow, updSubjMaster, delSubjMaster, importSubjects,
-  setAllotClass, updAllotRow,
+  addSubjectMasterRow, updSubjMaster, delSubjMaster, importSubjects,
+  addClass, setAllotClass, updAllotRow,
   setOurClass, createOurVersion, setOurActive, updOurMeta, updOurSubj,
   addOtherTT, setOtherActive, removeOtherTT, updOtherMeta, addOtherSubj, updOtherSubj, delOtherSubj,
   openCellPicker, closeModal, pickShortcut, saveCellCustom, clearCell,

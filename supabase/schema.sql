@@ -26,16 +26,29 @@ create table if not exists faculty (
   created_at timestamptz default now()
 );
 
+create table if not exists classes (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  sort_order int not null default 0,
+  created_at timestamptz default now()
+);
+insert into classes (name, sort_order)
+values ('II A',0), ('II B',1), ('III A',2), ('III B',3), ('IV A',4), ('IV B',5)
+on conflict (name) do nothing;
+
+-- subject_master is a single shared pool used by every class — class is no
+-- longer required; subjects are filtered into each class's Allotment screen
+-- by matching `semester` against that class's year (II -> III/IV, III ->
+-- V/VI, IV -> VII/VIII).
 create table if not exists subject_master (
   id uuid primary key default gen_random_uuid(),
-  class text not null,
+  class text,
   code text,
   title text not null,
   shortcut text,
   semester text,
   created_at timestamptz default now()
 );
-create index if not exists idx_subject_master_class on subject_master(class);
 
 create table if not exists allotments (
   id uuid primary key default gen_random_uuid(),
@@ -74,6 +87,7 @@ create table if not exists other_timetables (
 
 alter table app_settings enable row level security;
 alter table faculty enable row level security;
+alter table classes enable row level security;
 alter table subject_master enable row level security;
 alter table allotments enable row level security;
 alter table our_versions enable row level security;
@@ -82,6 +96,8 @@ alter table other_timetables enable row level security;
 create policy "auth read/write app_settings" on app_settings for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "auth read/write faculty" on faculty for all
+  using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "auth read/write classes" on classes for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "auth read/write subject_master" on subject_master for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');

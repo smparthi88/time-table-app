@@ -110,12 +110,28 @@ function emptyGrid(){ const g={}; DAYS.forEach(d=> g[d]=new Array(PERIOD_COUNT).
 function mask(v){ if(!v) return ""; const s=v.toString(); return s.length<=4? "••••" : "••••"+s.slice(-4); }
 
 function subjMasterList(cls){ if(!state.subjectMaster[cls]) state.subjectMaster[cls]=[]; return state.subjectMaster[cls]; }
-const YEAR_SEMESTERS = { "II":["III","IV"], "III":["V","VI"], "IV":["VII","VIII"] };
+const ROMAN_SEM = { "I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8 };
+const YEAR_SEMESTERS_NUM = { "II":[3,4], "III":[5,6], "IV":[7,8] };
 function classYear(cls){ return (cls||"").trim().split(" ")[0]; }
-function classSemesters(cls){ return YEAR_SEMESTERS[classYear(cls)] || []; }
+function classSemesters(cls){
+  const nums = YEAR_SEMESTERS_NUM[classYear(cls)] || [];
+  const rev = {}; Object.keys(ROMAN_SEM).forEach(k=> rev[ROMAN_SEM[k]]=k);
+  return nums.map(n=> rev[n] || String(n));
+}
+function semesterToNum(v){
+  if(v===undefined || v===null) return null;
+  const s = v.toString().trim().toUpperCase();
+  if(!s) return null;
+  if(ROMAN_SEM[s]!==undefined) return ROMAN_SEM[s];
+  const n = parseInt(s.replace(/[^0-9]/g,''), 10);
+  return isNaN(n) ? null : n;
+}
 function subjMasterListForClass(cls){
-  const allowed = classSemesters(cls);
-  return subjMasterList(cls).filter(s => !s.semester || allowed.includes(s.semester.trim().toUpperCase()));
+  const allowed = YEAR_SEMESTERS_NUM[classYear(cls)] || [];
+  return subjMasterList(cls).filter(s => {
+    const n = semesterToNum(s.semester);
+    return n===null || allowed.includes(n);
+  });
 }
 function allotList(cls,ay){
   if(!state.allotment[cls]) state.allotment[cls]={};
@@ -391,7 +407,7 @@ function viewSubjects(){
       <div class="field"><label>Subject Code (optional)</label><input type="text" id="s_code"></div>
       <div class="field"><label>Subject Name</label><input type="text" id="s_title"></div>
       <div class="field"><label>Shortcut</label><input type="text" id="s_short"></div>
-      <div class="field"><label>Semester</label><input type="text" id="s_sem" placeholder="e.g. III"></div>
+      <div class="field"><label>Semester</label><input type="text" id="s_sem" placeholder="e.g. III or 3"></div>
     </div>
     <div style="margin-top:10px;"><button class="btn primary" onclick="addSubjectMasterRow()">Add</button></div>
   </div>

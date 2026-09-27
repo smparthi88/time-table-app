@@ -110,6 +110,13 @@ function emptyGrid(){ const g={}; DAYS.forEach(d=> g[d]=new Array(PERIOD_COUNT).
 function mask(v){ if(!v) return ""; const s=v.toString(); return s.length<=4? "••••" : "••••"+s.slice(-4); }
 
 function subjMasterList(cls){ if(!state.subjectMaster[cls]) state.subjectMaster[cls]=[]; return state.subjectMaster[cls]; }
+const YEAR_SEMESTERS = { "II":["III","IV"], "III":["V","VI"], "IV":["VII","VIII"] };
+function classYear(cls){ return (cls||"").trim().split(" ")[0]; }
+function classSemesters(cls){ return YEAR_SEMESTERS[classYear(cls)] || []; }
+function subjMasterListForClass(cls){
+  const allowed = classSemesters(cls);
+  return subjMasterList(cls).filter(s => !s.semester || allowed.includes(s.semester.trim().toUpperCase()));
+}
 function allotList(cls,ay){
   if(!state.allotment[cls]) state.allotment[cls]={};
   if(!state.allotment[cls][ay]) state.allotment[cls][ay]=[];
@@ -160,6 +167,22 @@ function facultyWeek(name, scope){
     }));
   });
   return week;
+}
+function weekToHtmlTable(week, title){
+  const headRow = `<tr><th>Day</th>` + COLUMNS.map(col=> col.type==='period' ? `<th>${nl2br(col.label)}<br><span style="font-weight:400;">Hour ${col.hour}</span></th>` : `<th style="writing-mode:vertical-rl;transform:rotate(180deg);">${nl2br(col.tag)}</th>`).join('') + `</tr>`;
+  const rows = DAYS.map(day=>{
+    let cells = `<td class="day-cell">${day}</td>`;
+    COLUMNS.forEach(col=>{
+      if(col.type==='break'){ cells += `<td class="break-cell">${col.tag}</td>`; return; }
+      const cd = week[day][col.idx];
+      const bg = cd? cd.color : "transparent";
+      cells += `<td style="background:${bg};text-align:center;">${cd? `<b>${esc(cd.shortcut)}</b><br><span style="font-size:10px;">${esc(cd.text)}</span>` : ''}</td>`;
+    });
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  return `<div style="margin-top:14px;"><h4 style="margin:0 0 6px;">${esc(title)}</h4>
+    <div class="tt-wrap"><table class="grid"><thead>${headRow}</thead><tbody>${rows}</tbody></table></div>
+  </div>`;
 }
 function weekToAutotable(week){
   const head=[["Day"].concat(COLUMNS.map(c=> c.type==='period'? c.label.replace('\n',' ')+' (H'+c.hour+')' : c.tag))];
@@ -350,7 +373,10 @@ function exportFacultyDirectoryExcel(){
 
 /* ================= SUBJECT MASTER ================= */
 function viewSubjects(){
-  const list = subjMasterList(ui.subjClass);
+  const allSemList = subjMasterList(ui.subjClass);
+  const allowedSem = classSemesters(ui.subjClass);
+  const list = subjMasterListForClass(ui.subjClass);
+  const hiddenCount = allSemList.length - list.length;
   return `
   <div class="panel">
     <h2>Subject Master</h2>
@@ -376,7 +402,8 @@ function viewSubjects(){
     <div style="margin-top:8px;"><button class="btn" onclick="importSubjects()">Import</button></div>
   </div>
   <div class="panel">
-    <h3>Subjects — ${esc(ui.subjClass)}</h3>
+    <h3>Subjects — ${esc(ui.subjClass)} <span class="small-note">(Semester ${allowedSem.join(' & ')})</span></h3>
+    ${hiddenCount>0? `<div class="small-note" style="margin-bottom:6px;">${hiddenCount} subject(s) tagged with a different semester are hidden here — switch class to see them, or clear their Semester field.</div>` : ''}
     <div class="tt-wrap">
       <table class="datatable"><thead><tr><th>#</th><th>Code</th><th>Title</th><th>Shortcut</th><th>Semester</th><th></th></tr></thead>
       <tbody>${list.length===0? `<tr><td colspan="6" class="empty-note">No subjects yet.</td></tr>` : list.map((s,i)=>`
@@ -453,7 +480,10 @@ function importSubjects(){
 
 /* ================= ALLOTMENT ================= */
 function viewAllotment(){
-  const subjects = subjMasterList(ui.allotClass);
+  const allSubj = subjMasterList(ui.allotClass);
+  const subjects = subjMasterListForClass(ui.allotClass);
+  const allowedSem = classSemesters(ui.allotClass);
+  const hiddenCount = allSubj.length - subjects.length;
   const rows = allotList(ui.allotClass, ui.allotYear);
   const facOptions = state.faculty.map(f=>`<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
   return `
@@ -468,8 +498,9 @@ function viewAllotment(){
     </div>
   </div>
   <div class="panel">
-    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)}</h3>
-    ${subjects.length===0? `<div class="empty-note">No subjects in the Subject Master for ${esc(ui.allotClass)} yet — add them in the Subject Master tab first.</div>` : `
+    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)} <span class="small-note">(Semester ${allowedSem.join(' & ')})</span></h3>
+    ${hiddenCount>0? `<div class="small-note" style="margin-bottom:6px;">${hiddenCount} subject(s) tagged with a different semester are hidden here.</div>` : ''}
+    ${subjects.length===0? `<div class="empty-note">No subjects in the Subject Master for ${esc(ui.allotClass)} (Semester ${allowedSem.join(' & ')}) yet — add them in the Subject Master tab first.</div>` : `
     <div class="tt-wrap">
       <table class="datatable">
         <thead><tr><th>Code</th><th>Subject</th><th>Shortcut</th><th>Faculty</th><th>Colour</th><th>Work Load</th></tr></thead>
@@ -976,6 +1007,17 @@ function viewReports(){
       <button class="btn primary" ${ui.repFacMulti.length===0?'disabled':''} onclick="exportFacultyExcelReport()">⬇ Combined Excel (${ui.repFacMulti.length} sheets)</button>
     </div>
     <div class="small-note" style="margin-top:6px;">Each faculty's report shows three grids — Our Department only, Other Department only, and a Combined view — plus a subject-allotment/workload table with a grand total.</div>
+  </div>
+  ${ui.repFacMulti.length===1? facultyPreviewPanel(ui.repFacMulti[0]) : ''}`;
+}
+function facultyPreviewPanel(name){
+  return `
+  <div class="panel">
+    <h3>Preview — ${esc(name)}</h3>
+    <div class="small-note">Our Department and Other Department timetables merged into one combined view.</div>
+    ${weekToHtmlTable(facultyWeek(name,'all'), 'Combined (Our + Other Department)')}
+    ${weekToHtmlTable(facultyWeek(name,'class'), 'Our Department only')}
+    ${weekToHtmlTable(facultyWeek(name,'other'), 'Other Department only')}
   </div>`;
 }
 function toggleClassSel(c,checked){ if(checked){ if(!ui.repClassSel.includes(c)) ui.repClassSel.push(c);} else ui.repClassSel=ui.repClassSel.filter(x=>x!==c); renderTabBody(); }

@@ -389,10 +389,8 @@ function exportFacultyDirectoryExcel(){
 
 /* ================= SUBJECT MASTER ================= */
 function viewSubjects(){
-  const allSemList = subjMasterList(ui.subjClass);
   const allowedSem = classSemesters(ui.subjClass);
-  const list = subjMasterListForClass(ui.subjClass);
-  const hiddenCount = allSemList.length - list.length;
+  const list = subjMasterList(ui.subjClass);
   return `
   <div class="panel">
     <h2>Subject Master</h2>
@@ -418,8 +416,7 @@ function viewSubjects(){
     <div style="margin-top:8px;"><button class="btn" onclick="importSubjects()">Import</button></div>
   </div>
   <div class="panel">
-    <h3>Subjects — ${esc(ui.subjClass)} <span class="small-note">(Semester ${allowedSem.join(' & ')})</span></h3>
-    ${hiddenCount>0? `<div class="small-note" style="margin-bottom:6px;">${hiddenCount} subject(s) tagged with a different semester are hidden here — switch class to see them, or clear their Semester field.</div>` : ''}
+    <h3>Subjects — ${esc(ui.subjClass)} <span class="small-note">(typical Semester ${allowedSem.join(' & ')})</span></h3>
     <div class="tt-wrap">
       <table class="datatable"><thead><tr><th>#</th><th>Code</th><th>Title</th><th>Shortcut</th><th>Semester</th><th></th></tr></thead>
       <tbody>${list.length===0? `<tr><td colspan="6" class="empty-note">No subjects yet.</td></tr>` : list.map((s,i)=>`
@@ -496,10 +493,8 @@ function importSubjects(){
 
 /* ================= ALLOTMENT ================= */
 function viewAllotment(){
-  const allSubj = subjMasterList(ui.allotClass);
-  const subjects = subjMasterListForClass(ui.allotClass);
+  const subjects = subjMasterList(ui.allotClass);
   const allowedSem = classSemesters(ui.allotClass);
-  const hiddenCount = allSubj.length - subjects.length;
   const rows = allotList(ui.allotClass, ui.allotYear);
   const facOptions = state.faculty.map(f=>`<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
   return `
@@ -514,9 +509,8 @@ function viewAllotment(){
     </div>
   </div>
   <div class="panel">
-    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)} <span class="small-note">(Semester ${allowedSem.join(' & ')})</span></h3>
-    ${hiddenCount>0? `<div class="small-note" style="margin-bottom:6px;">${hiddenCount} subject(s) tagged with a different semester are hidden here.</div>` : ''}
-    ${subjects.length===0? `<div class="empty-note">No subjects in the Subject Master for ${esc(ui.allotClass)} (Semester ${allowedSem.join(' & ')}) yet — add them in the Subject Master tab first.</div>` : `
+    <h3>Allotment — ${esc(ui.allotClass)} · ${esc(ui.allotYear)} <span class="small-note">(typical Semester ${allowedSem.join(' & ')})</span></h3>
+    ${subjects.length===0? `<div class="empty-note">No subjects in the Subject Master for ${esc(ui.allotClass)} yet — add them in the Subject Master tab first.</div>` : `
     <div class="tt-wrap">
       <table class="datatable">
         <thead><tr><th>Code</th><th>Subject</th><th>Shortcut</th><th>Faculty</th><th>Colour</th><th>Work Load</th></tr></thead>

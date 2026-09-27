@@ -243,7 +243,8 @@ let ui = {
   otherActiveId: null,
   repClassSel: [],
   repFacSingle:"",
-  repFacMulti: []
+  repFacMulti: [],
+  indivFaculty: ""
 };
 
 /* ================= RENDER ROOT ================= */
@@ -267,6 +268,7 @@ function render(){
       ${tabBtn("allotment","Allotment")}
       ${tabBtn("ourdept","Our Department")}
       ${tabBtn("otherdept","Other Department")}
+      ${tabBtn("indiv","Individual Time Table")}
       ${tabBtn("reports","Reports")}
     </div>
     <div id="tabBody"></div>`;
@@ -281,6 +283,7 @@ function renderTabBody(){
   else if(ui.tab==='allotment') el.innerHTML = viewAllotment();
   else if(ui.tab==='ourdept') el.innerHTML = viewOurDept();
   else if(ui.tab==='otherdept') el.innerHTML = viewOtherDept();
+  else if(ui.tab==='indiv') el.innerHTML = viewIndividual();
   else if(ui.tab==='reports') el.innerHTML = viewReports();
 }
 
@@ -1010,6 +1013,180 @@ function exportExcel(scope,key){
   XLSX.writeFile(wb, `Timetable_${label.replace(/\s+/g,'_')}.xlsx`);
 }
 
+/* ================= INDIVIDUAL TIME TABLE (single-faculty official format) ================= */
+function yearLabelFromSource(source){
+  if(source.indexOf('Our Dept - ')===0){
+    const cls = source.replace('Our Dept - ','');
+    const parts = cls.trim().split(' ');
+    const year = parts[0]; const letter = parts.slice(1).join(' ');
+    return year + ' - IT' + (letter? ' - '+letter : '');
+  }
+  return source.replace('Other Dept - ','');
+}
+function individualGridHtml(week){
+  const headRow = `<tr><th>Timing</th>` + COLUMNS.map(col=> col.type==='period' ? `<th>${nl2br(col.label)}<br><span style="font-weight:400;">Hour ${col.hour}</span></th>` : `<th style="writing-mode:vertical-rl;transform:rotate(180deg);">${nl2br(col.tag)}</th>`).join('') + `</tr>`;
+  let rows = "";
+  DAYS.forEach((day,dayIdx)=>{
+    let cells = `<td class="day-cell">${day}</td>`;
+    COLUMNS.forEach(col=>{
+      if(col.type==='break'){
+        if(dayIdx===0) cells += `<td class="break-cell" rowspan="${DAYS.length}">${nl2br(col.label)}</td>`;
+        return;
+      }
+      const cd = week[day][col.idx];
+      const bg = cd? cd.color : "transparent";
+      cells += `<td style="background:${bg};">${cd? `<b>${esc(cd.shortcut)}</b><br><span style="font-size:10px;">${esc(cd.text)}</span>` : ''}</td>`;
+    });
+    rows += `<tr>${cells}</tr>`;
+  });
+  return `<div class="tt-wrap"><table class="grid"><thead>${headRow}</thead><tbody>${rows}</tbody></table></div>`;
+}
+function viewIndividual(){
+  const facOptions = state.faculty.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(f=>`<option value="${esc(f.name)}" ${ui.indivFaculty===f.name?'selected':''}>${esc(f.name)}</option>`).join('');
+  let reportHtml = '';
+  if(ui.indivFaculty){
+    const name = ui.indivFaculty;
+    const fac = state.faculty.find(f=>f.name===name);
+    const desig = fac? fac.designation : "";
+    const allotRows = facultyAllotmentRows(name);
+    const [ayFrom,ayTo] = acadParts(state.academicYear);
+    reportHtml = `
+    <div class="panel" id="indivReportArea">
+      <div style="text-align:center;">
+        <div style="font-weight:700;font-size:15px;">${esc(COLLEGE.name)}</div>
+        <div style="font-weight:700;font-size:12px;">${esc(COLLEGE.address).toUpperCase()}</div>
+        <div style="font-weight:700;font-size:12px;">TIME TABLE FOR ACADEMIC YEAR- ${ayFrom}-${ayTo} (${esc(state.semester)} SEM)</div>
+        <div style="font-weight:700;font-size:12px;">${esc(COLLEGE.dept)}</div>
+        <div style="font-weight:700;font-size:13px;margin-top:4px;">INDIVIDUAL TIME TABLE</div>
+      </div>
+      <div class="tt-wrap" style="margin-top:12px;">
+        <table class="datatable">
+          <tbody>
+            <tr><td style="font-weight:700;width:220px;">NAME OF THE FACULTY</td><td style="font-weight:700;">${esc(name)}${desig? ' '+esc(desig):''}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tt-wrap" style="margin-top:10px;">
+        <table class="datatable">
+          <thead><tr><th>Year</th><th>Subject Code</th><th>Subject Name</th><th>Hour</th></tr></thead>
+          <tbody>${allotRows.length===0? `<tr><td colspan="4" class="empty-note">No subjects allotted to this faculty yet.</td></tr>` : allotRows.map(r=>`
+            <tr><td>${esc(yearLabelFromSource(r.source))}</td><td>${esc(r.code)}</td><td>${esc(r.title)}</td><td style="text-align:center;">${esc(r.workload)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;">
+        ${individualGridHtml(facultyWeek(name,'all'))}
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:24px;">
+        <div style="font-weight:700;">Faculty Incharge</div>
+        <div style="font-weight:700;">HOD</div>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="panel">
+    <h2>Individual Time Table</h2>
+    <div class="small-note">Pick a faculty to see their full timetable — Our Department and Other Department merged — in the official Individual Time Table format.</div>
+    <div class="field" style="max-width:320px;margin-top:10px;">
+      <label>Faculty</label>
+      <select onchange="setIndivFaculty(this.value)">
+        <option value="">— Select faculty —</option>
+        ${facOptions}
+      </select>
+    </div>
+    ${ui.indivFaculty? `<div class="row" style="margin-top:10px;">
+      <button class="btn primary" onclick="exportIndividualPDF()">⬇ PDF</button>
+      <button class="btn primary" onclick="exportIndividualExcel()">⬇ Excel</button>
+    </div>` : ''}
+  </div>
+  ${reportHtml}`;
+}
+function setIndivFaculty(name){ ui.indivFaculty=name; renderTabBody(); }
+function drawIndividualHeader(doc, y0){
+  const [ayFrom,ayTo] = acadParts(state.academicYear);
+  const w = doc.internal.pageSize.getWidth();
+  doc.setFont("helvetica","bold"); doc.setFontSize(13);
+  doc.text(COLLEGE.name, w/2, y0, {align:"center"});
+  doc.setFontSize(9);
+  doc.text(COLLEGE.address.toUpperCase(), w/2, y0+5, {align:"center"});
+  doc.text(`TIME TABLE FOR ACADEMIC YEAR- ${ayFrom}-${ayTo} (${state.semester} SEM)`, w/2, y0+10, {align:"center"});
+  doc.text(COLLEGE.dept, w/2, y0+15, {align:"center"});
+  doc.setFontSize(11);
+  doc.text("INDIVIDUAL TIME TABLE", w/2, y0+21, {align:"center"});
+  return y0+27;
+}
+function drawIndividualFacultyPDF(doc, name){
+  let y = drawIndividualHeader(doc, 14);
+  const fac = state.faculty.find(f=>f.name===name);
+  const desig = fac? fac.designation : "";
+  doc.autoTable({
+    startY:y,
+    body:[["NAME OF THE FACULTY", `${name}${desig? ' '+desig:''}`]],
+    styles:{fontSize:9,cellPadding:2,fontStyle:'bold',halign:'center'},
+    columnStyles:{0:{cellWidth:80}},
+    margin:{left:14,right:14}
+  });
+  y = doc.lastAutoTable.finalY+2;
+
+  const allotRows = facultyAllotmentRows(name);
+  doc.autoTable({
+    startY:y,
+    head:[["YEAR","SUBJECT CODE","SUBJECT NAME","HOUR"]],
+    body: allotRows.map(r=>[yearLabelFromSource(r.source), r.code||'', r.title||'', r.workload||'']),
+    styles:{fontSize:8,cellPadding:1.6,halign:'center'},
+    headStyles:{fillColor:[238,241,247],textColor:20,fontStyle:'bold'},
+    margin:{left:14,right:14}
+  });
+  y = doc.lastAutoTable.finalY+4;
+
+  const {head,body} = weekToAutotable(facultyWeek(name,'all'));
+  doc.autoTable({ head, body, startY:y, styles:{fontSize:7,cellPadding:1.2,halign:'center',valign:'middle'}, headStyles:{fillColor:[238,241,247],textColor:20,fontStyle:'bold'}, margin:{left:14,right:14} });
+  y = doc.lastAutoTable.finalY+16;
+
+  doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.text("Faculty Incharge", 20, y);
+  doc.text("HOD", doc.internal.pageSize.getWidth()-40, y);
+}
+function exportIndividualPDF(){
+  if(!ui.indivFaculty) return;
+  const doc = new jsPDF({orientation:"landscape", unit:"mm", format:"a4"});
+  drawIndividualFacultyPDF(doc, ui.indivFaculty);
+  doc.save(`Individual_Timetable_${ui.indivFaculty.replace(/\s+/g,'_')}.pdf`);
+}
+function individualFacultySheetAOA(name){
+  const [ayFrom,ayTo] = acadParts(state.academicYear);
+  const fac = state.faculty.find(f=>f.name===name);
+  const desig = fac? fac.designation : "";
+  const aoa=[];
+  aoa.push([COLLEGE.name]);
+  aoa.push([COLLEGE.address]);
+  aoa.push([`TIME TABLE FOR ACADEMIC YEAR- ${ayFrom}-${ayTo} (${state.semester} SEM)`]);
+  aoa.push([COLLEGE.dept]);
+  aoa.push(["INDIVIDUAL TIME TABLE"]);
+  aoa.push([]);
+  aoa.push(["NAME OF THE FACULTY", `${name}${desig? ' '+desig:''}`]);
+  aoa.push([]);
+  aoa.push(["YEAR","SUBJECT CODE","SUBJECT NAME","HOUR"]);
+  const allotRows = facultyAllotmentRows(name);
+  allotRows.forEach(r=> aoa.push([yearLabelFromSource(r.source), r.code||'', r.title||'', r.workload||'']));
+  aoa.push([]);
+  const head=["Day"].concat(COLUMNS.map(c=> c.type==='period'? c.label.replace('\n',' ')+' (H'+c.hour+')' : c.tag));
+  aoa.push(head);
+  const week = facultyWeek(name,'all');
+  DAYS.forEach(day=>{ const row=[day]; COLUMNS.forEach(col=>{ if(col.type==='break'){row.push(col.tag);return;} const cd=week[day][col.idx]; row.push(cd? `${cd.shortcut} (${cd.text})`:''); }); aoa.push(row); });
+  aoa.push([]);
+  aoa.push(["Faculty Incharge","","HOD"]);
+  return aoa;
+}
+function exportIndividualExcel(){
+  if(!ui.indivFaculty) return;
+  const ws = XLSX.utils.aoa_to_sheet(individualFacultySheetAOA(ui.indivFaculty));
+  ws['!cols'] = new Array(14).fill({wch:14});
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Individual TT");
+  XLSX.writeFile(wb, `Individual_Timetable_${ui.indivFaculty.replace(/\s+/g,'_')}.xlsx`);
+}
+
 /* ================= REPORTS TAB ================= */
 function viewReports(){
   return `
@@ -1215,6 +1392,7 @@ Object.assign(window, {
   openCellPicker, closeModal, pickShortcut, saveCellCustom, clearCell,
   exportPDF, exportExcel,
   toggleClassSel, toggleFacSel, exportClassWisePDF, exportClassWiseExcel, exportFacultyPDFReport, exportFacultyExcelReport,
+  setIndivFaculty, exportIndividualPDF, exportIndividualExcel,
   exportBackup, reloadFromDatabase, doLogin, doLogout
 });
 
